@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chicken Racing Run - 10 Levels</title>
+    <style>
+        :root {
+            --primary-color: #4CAF50;
+            --accent-color: #2196F3;
+            --danger-color: #f44336;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: manipulation;
+            background: linear-gradient(45deg, #ff00ff, #00ff00, #00ffff, #ff00ff);
+            background-size: 400% 400%;
+            animation: neonPulse 10s ease infinite;
+        }
+
+        @keyframes neonPulse {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        canvas {
+            display: block;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 25px;
+            border-radius: 15px;
+            z-index: 100;
+        }
+
+        .game-stat {
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            width: 150px;
+        }
+
+        .control-button {
+            position: absolute;
+            bottom: 30px;
+            padding: 20px 40px;
+            font-size: 20px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            z-index: 10;
+            user-select: none;
+        }
+
+        #jumpBtn { right: 30px; }
+        #moveLeftBtn { left: 30px; }
+        #moveRightBtn { left: 180px; }
+        #pauseBtn {
+            background: var(--danger-color);
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .screen-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 200;
+        }
+
+        .screen-overlay h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .screen-overlay button {
+            padding: 15px 30px;
+            font-size: 20px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        <div class="game-stat">Lives: <span id="lives">3</span></div>
+        <div class="game-stat">Worms: <span id="worms">0</span></div>
+        <div class="game-stat">Level: <span id="level">1</span></div>
+        <button id="pauseBtn">Pause</button>
+    </div>
+
+    <button id="jumpBtn" class="control-button">Jump</button>
+    <button id="moveLeftBtn" class="control-button">←</button>
+    <button id="moveRightBtn" class="control-button">→</button>
+
+    <div id="gameOverScreen" class="screen-overlay">
+        <h1>Game Over!</h1>
+        <button id="restartBtnGameOver">Play Again</button>
+    </div>
+
+    <div id="winScreen" class="screen-overlay">
+        <h1>You Win!</h1>
+        <button id="restartBtnWin">Play Again</button>
+    </div>
+
+    <script>
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.setupCanvas();
+
+                // Game constants
+                this.GROUND_Y = this.canvas.height - 100;
+                this.MAX_LEVEL = 10;
+                this.INITIAL_SPEED = 5;
+                this.GRAVITY = 0.8;
+
+                // Game state
+                this.lives = 3;
+                this.worms = 0;
+                this.level = 1;
+                this.speed = this.INITIAL_SPEED;
+                this.gameOver = false;
+                this.isPaused = false;
+
+                // Game objects
+                this.player = new Player(this);
+                this.obstacles = [];
+                this.worms = [];
+
+                // Load assets
+                this.loadAssets();
+                this.setupControls();
+                this.setupAudio();
+
+                // Start game
+                this.reset();
+            }
+
+            setupCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                window.addEventListener('resize', () => {
+                    this.canvas.width = window.innerWidth;
+                    this.canvas.height = window.innerHeight;
+                    this.GROUND_Y = this.canvas.height - 100;
+                    this.player.y = this.GROUND_Y - this.player.height;
+                });
+            }
+
+            loadAssets() {
+                this.images = {
+                    player: this.loadImage('chicken.png'),
+                    obstacle: this.loadImage('rock.png'),
+                    worm: this.loadImage('worm.png'),
+                    ground: this.loadImage('ground.png'),
+                    trees: this.loadImage('trees.png')
+                };
+            }
+
+            loadImage(src) {
+                const img = new Image();
+                img.src = `https://raw.githubusercontent.com/replit-discord/game-assets/main/${src}`;
+                return img;
+            }
+
+            setupAudio() {
+                this.sounds = {
+                    jump: new Audio('https://www.soundjay.com/button/sounds/button-16.mp3'),
+                    collect: new Audio('https://www.soundjay.com/button/sounds/beep-07.mp3'),
+                    hit: new Audio('https://www.soundjay.com/button/sounds/click-14.mp3'),
+                    extraLife: new Audio('https://www.soundjay.com/button/sounds/button-09.mp3')
+                };
+
+                // Enable audio on first interaction
+                const enableAudio = () => {
+                    Object.values(this.sounds).forEach(sound => {
+                        sound.play().then(() => {
+                            sound.pause();
+                            sound.currentTime = 0;
+                        }).catch(() => {});
+                    });
+                    document.removeEventListener('touchstart', enableAudio);
+                    document.removeEventListener('mousedown', enableAudio);
+                };
+
+                document.addEventListener('touchstart', enableAudio);
+                document.addEventListener('mousedown', enableAudio);
+            }
+
+            setupControls() {
+                // Keyboard controls
+                document.addEventListener('keydown', (e) => {
+                    if ((e.code === 'Space' || e.code === 'ArrowUp') && 
+                        this.player.jumpCount < this.player.maxJumps) {
+                        this.player.jump();
+                    }
+                    if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
+                        this.player.moveLeft = true;
+                    }
+                    if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
+                        this.player.moveRight = true;
+                    }
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
+                        this.player.moveLeft = false;
+                    }
+                    if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
+                        this.player.moveRight = false;
+                    }
+                });
+
+                // Touch controls
+                document.getElementById('jumpBtn').addEventListener('click', () => {
+                    if (this.player.jumpCount < this.player.maxJumps) {
+                        this.player.jump();
+                    }
+                });
+
+                ['moveLeftBtn', 'moveRightBtn'].forEach(btnId => {
+                    const btn = document.getElementById(btnId);
+                    const isLeft = btnId === 'moveLeftBtn';
+
+                    btn.addEventListener('touchstart', (e) => {
+                        e.preventDefault();
+                        isLeft ? this.player.moveLeft = true : this.player.moveRight = true;
+                    });
+
+                    ['touchend', 'touchcancel'].forEach(event => {
+                        btn.addEventListener(event, () => {
+                            isLeft ? this.player.moveLeft = false : this.player.moveRight = false;
+                        });
+                    });
+                });
+
+                // Pause button
+                document.getElementById('pauseBtn').addEventListener('click', () => {
+                    this.togglePause();
+                });
+
+                // Restart buttons
+                document.getElementById('restartBtnGameOver').addEventListener('click', () => this.reset());
+                document.getElementById('restartBtnWin').addEventListener('click', () => this.reset());
+            }
+
+            spawnObstacle() {
+                const obstacle = {
+                    x: this.canvas.width + Math.random() * 300,
+                    y: this.GROUND_Y - (40 + Math.random() * 30),
+                    width: 40 + Math.random() * 30,
+                    height: 40 + Math.random() * 30
+                };
+                this.obstacles.push(obstacle);
+            }
+
+            spawnWorm() {
+                const worm = {
+                    x: this.canvas.width + Math.random() * 500,
+                    y: Math.random() * (this.GROUND_Y - 70),
+                    width: 20,
+                    height: 20
+                };
+                this.worms.push(worm);
+            }
+
+            update() {
+                if (this.gameOver || this.isPaused) return;
+
+                this.player.update();
+                this.updateObstacles();
+                this.updateWorms();
+                this.checkCollisions();
+            }
+
+            updateObstacles() {
+                this.obstacles.forEach((obs, i) => {
+                    obs.x -= this.speed;
+                    if (obs.x + obs.width < 0) {
+                        this.obstacles.splice(i, 1);
+                    }
+                });
+            }
+
+            updateWorms() {
+                this.worms.forEach((worm, i) => {
+                    worm.x -= this.speed;
+                    if (worm.x + worm.width < 0) {
+                        this.worms.splice(i, 1);
+                    }
+                });
+            }
+
+            checkCollisions() {
+                // Check obstacle collisions
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    if (this.checkCollision(this.player, this.obstacles[i])) {
+                        this.sounds.hit.play();
+                        this.lives--;
+                        document.getElementById('lives').textContent = this.lives;
+                        this.obstacles.splice(i, 1);
+                        this.player.x -= 50; // Knockback
+
+                        if (this.lives <= 0) {
+                            this.end();
+                            return;
+                        }
+                    }
+                }
+
+                // Check worm collisions
+                for (let i = this.worms.length - 1; i >= 0; i--) {
+                    if (this.checkCollision(this.player, this.worms[i])) {
+                        this.sounds.collect.play();
+                        this.sounds.extraLife.play();
+                        this.wormCount++;
+                        this.lives++;
+                        document.getElementById('worms').textContent = this.wormCount;
+                        document.getElementById('lives').textContent = this.lives;
+                        this.worms.splice(i, 1);
+                        this.checkLevelUp();
+                    }
+                }
+            }
+
+            checkCollision(a, b) {
+                return (
+                    a.x < b.x + b.width &&
+                    a.x + a.width > b.x &&
+                    a.y < b.y + b.height &&
+                    a.y + a.height > b.y
+                );
+            }
+
+            checkLevelUp() {
+                if (this.wormCount >= this.level * 3 && this.level < this.MAX_LEVEL) {
+                    this.level++;
+                    this.speed += 1.5;
+                    document.getElementById('level').textContent = this.level;
+                    this.obstacles = [];
+                    this.worms = [];
+                    alert(`Level Up! You are now on Level ${this.level}!`);
+                } else if (this.wormCount >= this.MAX_LEVEL * 3) {
+                    this.win();
+                }
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw background
+                for (let i = 0; i < this.canvas.width; i += 300) {
+                    this.ctx.drawImage(this.images.trees, i, this.GROUND_Y - 200, 300, 200);
+                }
+
+                // Draw ground
+                const groundPattern = this.ctx.createPattern(this.images.ground, 'repeat');
+                this.ctx.fillStyle = groundPattern;
+                this.ctx.fillRect(0, this.GROUND_Y, this.canvas.width, this.canvas.height - this.GROUND_Y);
+
+                // Draw game objects
+                this.drawObstacles();
+                this.drawWorms();
+                this.drawPlayer();
+            }
+
+            drawObstacles() {
+                this.obstacles.forEach(obs => {
+                    this.ctx.drawImage(this.images.obstacle, obs.x, obs.y, obs.width, obs.height);
+                });
+            }
+
+            drawWorms() {
+                this.worms.forEach(worm => {
+                    this.ctx.drawImage(this.images.worm, worm.x, worm.y, worm.width, worm.height);
+                });
+            }
+
+            drawPlayer() {
+                // Save context state
+                this.ctx.save();
+                
+                // Apply pink tint
+                this.ctx.fillStyle = '#FF69B4';
+                this.ctx.globalCompositeOperation = 'source-atop';
+                
+                // Draw the chicken
+                this.ctx.drawImage(
+                    this.images.player,
+                    this.player.x,
+                    this.player.y,
+                    this.player.width,
+                    this.player.height
+                );
+                
+                // Add pink overlay
+                this.ctx.fillRect(
+                    this.player.x,
+                    this.player.y,
+                    this.player.width,
+                    this.player.height
+                );
+                
+                // Restore context state
+                this.ctx.restore();
+            }
+
+            togglePause() {
+                this.isPaused = !this.isPaused;
+                document.getElementById('pauseBtn').textContent = this.isPaused ? 'Resume' : 'Pause';
+                if (!this.isPaused) {
+                    requestAnimationFrame(() => this.gameLoop());
+                }
+            }
+
+            end() {
+                this.gameOver = true;
+                document.getElementById('gameOverScreen').style.display = 'flex';
+            }
+
+            win() {
+                this.gameOver = true;
+                document.getElementById('winScreen').style.display = 'flex';
+            }
+
+            reset() {
+                this.lives = 3;
+                this.wormCount = 0;
+                this.level = 1;
+                this.speed = this.INITIAL_SPEED;
+                this.gameOver = false;
+                this.isPaused = false;
+
+                document.getElementById('lives').textContent = this.lives;
+                document.getElementById('worms').textContent = this.wormCount;
+                document.getElementById('level').textContent = this.level;
+                document.getElementById('pauseBtn').textContent = 'Pause';
+
+                this.player.reset();
+                this.obstacles = [];
+                this.worms = [];
+
+                document.getElementById('gameOverScreen').style.display = 'none';
+                document.getElementById('winScreen').style.display = 'none';
+
+                this.startSpawning();
+                this.gameLoop();
+            }
+
+            startSpawning() {
+                if (this.obstacleTimer) clearInterval(this.obstacleTimer);
+                if (this.wormTimer) clearInterval(this.wormTimer);
+
+                this.obstacleTimer = setInterval(() => this.spawnObstacle(), 1500 - (this.level * 50));
+                this.wormTimer = setInterval(() => this.spawnWorm(), 2000 + (this.level * 100));
+            }
+
+            gameLoop() {
+                if (!this.gameOver && !this.isPaused) {
+                    this.update();
+                    this.draw();
+                    requestAnimationFrame(() => this.gameLoop());
+                }
+            }
+        }
+
+        class Player {
+            constructor(game) {
+                this.game = game;
+                this.width = 50;
+                this.height = 50;
+                this.maxJumps = 3;
+                this.jumpStrength = -15;
+                this.moveSpeed = 5;
+                this.reset();
+            }
+
+            reset() {
+                this.x = 100;
+                this.y = this.game.GROUND_Y - this.height;
+                this.velocityY = 0;
+                this.jumpCount = 0;
+                this.moveLeft = false;
+                this.moveRight = false;
+            }
+
+            update() {
+                // Vertical movement
+                this.velocityY += this.game.GRAVITY;
+                this.y += this.velocityY;
+
+                // Ground collision
+                if (this.y + this.height > this.game.GROUND_Y) {
+                    this.y = this.game.GROUND_Y - this.height;
+                    this.velocityY = 0;
+                    this.jumpCount = 0;
+                }
+
+                // Horizontal movement
+                if (this.moveLeft) this.x -= this.moveSpeed;
+                if (this.moveRight) this.x += this.moveSpeed;
+
+                // Screen boundaries
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > this.game.canvas.width) {
+                    this.x = this.game.canvas.width - this.width;
+                }
+            }
+
+            jump() {
+                if (this.jumpCount < this.maxJumps) {
+                    this.velocityY = this.jumpStrength;
+                    this.jumpCount++;
+                    this.game.sounds.jump.play();
+                }
+            }
+        }
+
+        // Start the game
+        window.addEventListener('load', () => {
+            new Game();
+        });
+    </script>
+</body>
+</html>
